@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { quotaApi } from '@/api'
 import { isLoggedIn, hasWallet, loginWithWallet } from '@/plugins/auth'
 
@@ -57,37 +57,50 @@ async function fetchFiles(path: string = '/') {
 // 解析 WebDAV PROPFIND 响应
 function parsePropfindResponse(xml: string): FileItem[] {
   const items: FileItem[] = []
-  // 使用 /i 忽略大小写，因为 XML 中可能是 <D:href> 或 <d:href>
-  const nameRegex = /<[Dd]:displayname>([^<]+)<\/[Dd]:displayname>/gi
-  const sizeRegex = /<[Dd]:getcontentlength>([^<]+)<\/[Dd]:getcontentlength>/gi
-  const lastModRegex = /<[Dd]:getlastmodified>([^<]+)<\/[Dd]:getlastmodified>/gi
+
+  // 提取所有 href - 匹配 <d:href> 或 <D:href>
   const hrefRegex = /<[Dd]:href>([^<]+)<\/[Dd]:href>/gi
-
-  console.log('parsePropfindResponse xml:', xml)
-  console.log('hrefRegex lastIndex:', hrefRegex.lastIndex)
-
   const hrefs = [...xml.matchAll(hrefRegex)]
+
+  // 提取所有 displayname - 匹配 <d:displayname> 或 <D:displayname>
+  const nameRegex = /<[Dd]:displayname>([^<]*)<\/[Dd]:displayname>/gi
   const names = [...xml.matchAll(nameRegex)]
+
+  // 提取所有文件大小
+  const sizeRegex = /<[Dd]:getcontentlength>([^<]*)<\/[Dd]:getcontentlength>/gi
   const sizes = [...xml.matchAll(sizeRegex)]
+
+  // 提取所有修改时间
+  const lastModRegex = /<[Dd]:getlastmodified>([^<]+)<\/[Dd]:getlastmodified>/gi
   const lastMods = [...xml.matchAll(lastModRegex)]
 
-  console.log('hrefs count:', hrefs.length, 'names count:', names.length)
-  console.log('names:', names.map(n => n[1]))
+  console.log('PROPFIND debug: hrefs:', hrefs.length, 'names:', names.length, 'sizes:', sizes.length)
 
   // 从 hrefs 中提取路径，排除根目录
+  // hrefs[0] 是当前目录自身，从 i=1 开始是子项
   for (let i = 1; i < hrefs.length; i++) {
     const href = decodeURIComponent(hrefs[i][1])
-    // 从 href 路径提取名称，如 /test/ → test
-    let name = href.split('/').filter(Boolean).pop() || ''
-    // 优先使用 displayname
-    if (names[i - 1]?.[1]) {
-      name = names[i - 1][1]
-    }
-    const size = parseInt(sizes[i - 1]?.[1] || '0')
-    const lastMod = lastMods[i - 1]?.[1] || ''
+    const displayName = names[i]?.[1] || ''
 
-    // 排除自身
+    // 从 href 路径提取名称，如 /test/file.png → file.png
+    let name = href.split('/').filter(Boolean).pop() || ''
+
+    // 只有当 displayname 非空且不是目录时，才使用 displayname
+    // 目录的 displayname 可能跟目录名相同，文件的 displayname 通常为空
+    if (displayName && displayName.trim() !== '') {
+      // 检查是否是文件（没有尾斜杠）
+      if (!href.endsWith('/')) {
+        name = displayName
+      }
+    }
+
+    console.log(`PROPFIND item[${i}]: name=${name}, href=${href}, displayname=${displayName}`)
+
+    // 排除自身（空名称）
     if (name === '') continue
+
+    const size = parseInt(sizes[i]?.[1] || '0')
+    const lastMod = lastMods[i]?.[1] || ''
 
     items.push({
       name,
@@ -196,10 +209,12 @@ async function handleFileSelect(event: Event) {
     }
 
     uploadProgress.value = '上传完成'
-    setTimeout(() => {
-      uploadProgress.value = null
-      fetchFiles(currentPath.value)
-    }, 1000)
+    // 等待文件完全写入后再刷新列表
+    await new Promise(resolve => setTimeout(resolve, 500))
+    await fetchFiles(currentPath.value)
+    // 等待 Vue 更新 DOM 后再清除进度
+    await nextTick()
+    uploadProgress.value = null
   } catch (error) {
     uploadProgress.value = `上传失败: ${error}`
   }

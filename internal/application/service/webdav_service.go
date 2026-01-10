@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/yeying-community/webdav/internal/domain/permission"
 	"github.com/yeying-community/webdav/internal/domain/quota"
@@ -411,6 +412,15 @@ func (s *WebDAVService) checkPermission(ctx context.Context, u *user.User, r *ht
 	// 映射 HTTP 方法到操作
 	operation := permission.MapHTTPMethodToOperation(r.Method)
 
+	// 拼接用户目录和请求路径，得到相对于 webdav 根目录的完整路径
+	// 例如：用户目录是 "BraveWolf44"，请求路径是 "/test/icon16.png"
+	// 需要检查的是 "BraveWolf44/test/icon16.png"
+	userDir := u.Directory
+	if userDir == "" {
+		userDir = u.Username
+	}
+	fullPath := filepath.Join(userDir, strings.TrimPrefix(r.URL.Path, "/"))
+
 	// 检查权限
-	return s.permissionCheck.Check(ctx, u, r.URL.Path, operation)
+	return s.permissionCheck.Check(ctx, u, fullPath, operation)
 }
