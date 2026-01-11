@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick, computed } from 'vue'
-import { Download, Delete, Refresh, FolderOpened, DocumentCopy, Edit } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
-import { quotaApi, recycleApi, type RecycleItem } from '@/api'
+import { Download, Delete, Refresh, FolderOpened, DocumentCopy, Edit, Share } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { quotaApi, recycleApi, shareApi, type RecycleItem, type ShareItem } from '@/api'
 import { isLoggedIn, hasWallet, loginWithWallet } from '@/plugins/auth'
 import { parsePropfindResponse } from '@/utils/webdav'
 
@@ -25,9 +25,16 @@ const uploadProgress = ref<string | null>(null)
 const showRecycle = ref(false)
 const recycleList = ref<RecycleItem[]>([])
 const recycleLoading = ref(false)
+const showShare = ref(false)
+const shareList = ref<ShareItem[]>([])
+const shareLoading = ref(false)
 
 // 是否显示回收站列表
-const displayList = computed(() => showRecycle.value ? recycleList.value : fileList.value)
+const displayList = computed(() => {
+  if (showRecycle.value) return recycleList.value
+  if (showShare.value) return shareList.value
+  return fileList.value
+})
 const breadcrumbItems = computed(() => {
   if (showRecycle.value) return []
   const parts = currentPath.value.split('/').filter(Boolean)
@@ -123,7 +130,7 @@ function enterDirectory(item: FileItem) {
 
 // 单击行进入目录（回收站模式不响应）
 function handleRowClick(row: FileItem) {
-  if (showRecycle.value) return
+  if (showRecycle.value || showShare.value) return
   if (row.isDir) {
     enterDirectory(row)
   }
@@ -133,13 +140,14 @@ function handleRowClick(row: FileItem) {
 function refreshCurrentView() {
   if (showRecycle.value) {
     fetchRecycle()
+  } else if (showShare.value) {
+    fetchShare()
   } else {
     fetchFiles(currentPath.value)
   }
 }
 
-async function copyCurrentPath() {
-  const text = showRecycle.value ? '回收站' : currentPath.value
+async function copyText(text: string, successMessage: string) {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text)
@@ -154,11 +162,16 @@ async function copyCurrentPath() {
       document.execCommand('copy')
       document.body.removeChild(textarea)
     }
-    ElMessage.success('已复制当前路径')
+    ElMessage.success(successMessage)
   } catch (error) {
     console.error('复制失败:', error)
     ElMessage.error('复制失败')
   }
+}
+
+async function copyCurrentPath() {
+  const text = showRecycle.value ? '回收站' : currentPath.value
+  await copyText(text, '已复制当前路径')
 }
 
 // 返回上级目录
@@ -233,6 +246,39 @@ async function renameItem(item: FileItem) {
     await fetchFiles(currentPath.value)
   } catch (error) {
     alert(`重命名失败: ${error}`)
+  }
+}
+
+async function shareFile(item: FileItem) {
+  if (item.isDir) return
+  try {
+    let expiresIn: number | undefined
+    try {
+      const { value } = await ElMessageBox.prompt(
+        '设置有效期（小时，0 表示永不过期）',
+        '创建分享链接',
+        {
+          confirmButtonText: '创建',
+          cancelButtonText: '取消',
+          inputPattern: /^\d+$/,
+          inputErrorMessage: '请输入非负整数',
+          inputValue: '0'
+        }
+      )
+      const hours = parseInt(value, 10)
+      if (Number.isFinite(hours) && hours > 0) {
+        expiresIn = hours * 3600
+      }
+    } catch {
+      return
+    }
+
+    const data = await shareApi.create(item.path, expiresIn)
+    const url = data.url || `${window.location.origin}/api/v1/public/share/${data.token}`
+    await copyText(url, '分享链接已复制')
+  } catch (error) {
+    console.error('创建分享失败:', error)
+    ElMessage.error('创建分享失败')
   }
 }
 
@@ -323,12 +369,14 @@ async function fetchRecycle() {
 // 进入回收站
 function enterRecycle() {
   showRecycle.value = true
+  showShare.value = false
   fetchRecycle()
 }
 
 // 返回文件列表
 function backToFiles() {
   showRecycle.value = false
+  showShare.value = false
   fetchFiles(currentPath.value)
 }
 
@@ -352,6 +400,42 @@ async function permanentlyDelete(item: RecycleItem) {
   } catch (error) {
     alert(`删除失败: ${error}`)
   }
+}
+
+// 获取分享列表
+async function fetchShare() {
+  shareLoading.value = true
+  try {
+    const data = await shareApi.list()
+    shareList.value = data.items
+  } catch (error) {
+    console.error('获取分享列表失败:', error)
+  } finally {
+    shareLoading.value = false
+  }
+}
+
+// 进入分享管理
+function enterShare() {
+  showShare.value = true
+  showRecycle.value = false
+  fetchShare()
+}
+
+// 取消分享
+async function revokeShare(item: ShareItem) {
+  if (!confirm(`确定取消分享 ${item.name} 吗？`)) return
+  try {
+    await shareApi.revoke(item.token)
+    fetchShare()
+  } catch (error) {
+    alert(`取消分享失败: ${error}`)
+  }
+}
+
+async function copyShareLink(item: ShareItem) {
+  const url = item.url || `${window.location.origin}/api/v1/public/share/${item.token}`
+  await copyText(url, '分享链接已复制')
 }
 
 // 新建文件夹
@@ -493,10 +577,14 @@ onMounted(() => {
               <el-icon class="nav-icon"><Delete /></el-icon>
               <span>回收站</span>
             </button>
-            <button type="button" class="nav-item is-soon" disabled>
-              <el-icon class="nav-icon"><Download /></el-icon>
+            <button
+              type="button"
+              class="nav-item"
+              :class="{ active: showShare }"
+              @click="enterShare"
+            >
+              <el-icon class="nav-icon"><Share /></el-icon>
               <span>文件分享</span>
-              <el-tag size="small" type="info">规划中</el-tag>
             </button>
             <button type="button" class="nav-item is-soon" disabled>
               <el-icon class="nav-icon"><Refresh /></el-icon>
@@ -532,6 +620,12 @@ onMounted(() => {
                   </el-tooltip>
                 </div>
               </template>
+              <template v-else-if="showShare">
+                <div class="path-pill">
+                  <span class="path-label">当前位置</span>
+                  <span class="path-value">文件分享</span>
+                </div>
+              </template>
               <template v-else>
                 <div class="breadcrumb">
                   <el-breadcrumb separator="/">
@@ -559,6 +653,11 @@ onMounted(() => {
                 <el-icon><Refresh /></el-icon> 刷新
               </el-button>
             </template>
+            <template v-else-if="showShare">
+              <el-button @click="refreshCurrentView" :loading="shareLoading">
+                <el-icon><Refresh /></el-icon> 刷新
+              </el-button>
+            </template>
             <template v-else>
               <el-button @click="createFolder">
                 <span class="iconfont icon-tianjia"></span> 新建文件夹
@@ -583,7 +682,7 @@ onMounted(() => {
           <!-- 文件列表 -->
           <el-table
             :data="displayList"
-            v-loading="showRecycle ? recycleLoading : loading"
+            v-loading="showRecycle ? recycleLoading : (showShare ? shareLoading : loading)"
             style="width: 100%"
             @row-click="handleRowClick"
           >
@@ -634,6 +733,48 @@ onMounted(() => {
                 </template>
               </el-table-column>
             </template>
+            <template v-else-if="showShare">
+              <el-table-column label="名称" min-width="200">
+                <template #default="{ row }">
+                  <div class="file-name">
+                    <span class="iconfont icon-wenjian1"></span>
+                    <span class="name">{{ row.name }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="路径" min-width="180">
+                <template #default="{ row }">
+                  {{ row.path }}
+                </template>
+              </el-table-column>
+              <el-table-column label="访问/下载" width="110">
+                <template #default="{ row }">
+                  {{ row.viewCount ?? 0 }}/{{ row.downloadCount ?? 0 }}
+                </template>
+              </el-table-column>
+              <el-table-column label="过期时间" width="160">
+                <template #default="{ row }">
+                  {{ row.expiresAt ? formatTime(row.expiresAt) : '-' }}
+                </template>
+              </el-table-column>
+              <el-table-column label="创建时间" width="160">
+                <template #default="{ row }">
+                  {{ row.createdAt ? formatTime(row.createdAt) : '-' }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="120" fixed="right">
+                <template #default="{ row }">
+                  <div class="actions">
+                    <el-tooltip content="复制链接" placement="top">
+                      <el-button link :icon="DocumentCopy" @click="copyShareLink(row)" />
+                    </el-tooltip>
+                    <el-tooltip content="取消分享" placement="top">
+                      <el-button type="danger" link :icon="Delete" @click="revokeShare(row)" />
+                    </el-tooltip>
+                  </div>
+                </template>
+              </el-table-column>
+            </template>
             <!-- 文件列表模式 -->
             <template v-else>
               <el-table-column label="名称" min-width="280">
@@ -654,11 +795,14 @@ onMounted(() => {
                   {{ formatTime(row.modified) }}
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="140" fixed="right">
+              <el-table-column label="操作" width="180" fixed="right">
                 <template #default="{ row }">
                   <div class="actions" @click.stop>
                     <el-tooltip v-if="!row.isDir" content="下载" placement="top">
                       <el-button type="primary" link :icon="Download" @click="downloadFile(row)" />
+                    </el-tooltip>
+                    <el-tooltip v-if="!row.isDir" content="分享" placement="top">
+                      <el-button type="primary" link :icon="Share" @click="shareFile(row)" />
                     </el-tooltip>
                     <el-tooltip content="重命名" placement="top">
                       <el-button type="primary" link :icon="Edit" @click="renameItem(row)" />
@@ -700,8 +844,7 @@ onMounted(() => {
 
         <div class="info-card muted">
           <div class="card-title">文件分享</div>
-          <p class="card-desc">为单个文件生成可控访问链接。</p>
-          <el-button size="small" disabled>创建分享链接</el-button>
+          <p class="card-desc">在文件列表中点击分享图标生成链接。</p>
         </div>
 
         <div class="info-card muted">
@@ -950,6 +1093,20 @@ onMounted(() => {
   transition: all 0.2s ease;
 }
 
+.share-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.share-text {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #606266;
+}
+
 .copy-icon:hover {
   background: rgba(64, 158, 255, 0.12);
   color: #409eff;
@@ -992,6 +1149,10 @@ onMounted(() => {
 .actions {
   display: flex;
   gap: 8px;
+}
+
+.actions .el-button {
+  padding: 0 4px;
 }
 
 .upload-tip {

@@ -140,7 +140,7 @@ func (s *WebDAVService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 规范化 MOVE/COPY 的 Destination 头，避免编码或代理导致的路径异常
-	if r.Method == http.MethodMove || r.Method == http.MethodCopy {
+	if r.Method == "MOVE" || r.Method == "COPY" {
 		normalizeDestinationHeader(r)
 	}
 

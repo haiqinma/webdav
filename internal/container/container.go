@@ -29,13 +29,15 @@ type Container struct {
 	DB *database.PostgresDB
 
 	// Repositories
-	UserRepository   user.Repository
+	UserRepository    user.Repository
 	RecycleRepository repository.RecycleRepository
+	ShareRepository   repository.ShareRepository
 
 	// Services
-	QuotaService    quota.Service
-	WebDAVService   *service.WebDAVService
-	RecycleService  *service.RecycleService
+	QuotaService   quota.Service
+	WebDAVService  *service.WebDAVService
+	RecycleService *service.RecycleService
+	ShareService   *service.ShareService
 
 	// Authenticators
 	Authenticators []auth.Authenticator
@@ -48,6 +50,7 @@ type Container struct {
 	WebDAVHandler  *handler.WebDAVHandler
 	QuotaHandler   *handler.QuotaHandler
 	RecycleHandler *handler.RecycleHandler
+	ShareHandler   *handler.ShareHandler
 
 	// HTTP
 	Router *http.Router
@@ -149,6 +152,8 @@ func (c *Container) initRepositories() error {
 
 	// 回收站仓储
 	c.RecycleRepository = repository.NewPostgresRecycleRepository(c.DB.DB)
+	// 分享仓储
+	c.ShareRepository = repository.NewPostgresShareRepository(c.DB.DB)
 
 	c.Logger.Info("using PostgreSQL user repository")
 	c.Logger.Info("repositories initialized", zap.Int("seed_users", len(c.Config.Users)))
@@ -176,6 +181,14 @@ func (c *Container) initServices() error {
 	// 回收站服务
 	c.RecycleService = service.NewRecycleService(
 		c.RecycleRepository,
+		c.UserRepository,
+		c.Config,
+		c.Logger,
+	)
+
+	// 分享服务
+	c.ShareService = service.NewShareService(
+		c.ShareRepository,
 		c.UserRepository,
 		c.Config,
 		c.Logger,
@@ -242,6 +255,12 @@ func (c *Container) initHandlers() error {
 		c.Logger,
 	)
 
+	// 分享处理器
+	c.ShareHandler = handler.NewShareHandler(
+		c.ShareService,
+		c.Logger,
+	)
+
 	c.Logger.Info("handlers initialized")
 
 	return nil
@@ -258,6 +277,7 @@ func (c *Container) initHTTP() error {
 		c.WebDAVHandler,
 		c.QuotaHandler,
 		c.RecycleHandler,
+		c.ShareHandler,
 		c.Logger,
 	)
 
@@ -289,4 +309,3 @@ func (c *Container) Close() error {
 
 	return nil
 }
-

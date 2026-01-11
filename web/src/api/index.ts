@@ -109,3 +109,46 @@ export const recycleApi = {
     })
   }
 }
+
+// 分享项目类型
+export interface ShareItem {
+  token: string
+  name: string
+  path: string
+  url: string
+  viewCount: number
+  downloadCount: number
+  expiresAt?: string
+  createdAt?: string
+}
+
+// 分享 API
+export const shareApi = {
+  create(path: string, expiresIn?: number) {
+    return request<{
+      token: string
+      name: string
+      path: string
+      url: string
+      viewCount: number
+      downloadCount: number
+      expiresAt?: string
+    }>('/api/v1/public/share/create', {
+      method: 'POST',
+      body: { path, expiresIn }
+    })
+  },
+
+  list() {
+    return request<{
+      items: ShareItem[]
+    }>('/api/v1/public/share/list')
+  },
+
+  revoke(token: string) {
+    return request('/api/v1/public/share/revoke', {
+      method: 'POST',
+      body: { token }
+    })
+  }
+}
