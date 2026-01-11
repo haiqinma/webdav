@@ -94,28 +94,32 @@ async function downloadFile(item: FileItem) {
 
   uploadProgress.value = '下载中...'
 
-  // 使用 cookie 认证，让浏览器自动处理 Range 请求
-  // 通过隐藏的 iframe 下载文件
-  const iframe = document.createElement('iframe')
-  iframe.style.display = 'none'
-  iframe.src = apiPath
+  try {
+    const token = localStorage.getItem('authToken') || ''
+    const response = await fetch(apiPath, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
 
-  iframe.onload = function() {
+    if (!response.ok) {
+      throw new Error('下载失败')
+    }
+
+    const blob = await response.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = item.name
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+  } catch (error) {
+    alert(`下载失败: ${error}`)
+  } finally {
     uploadProgress.value = null
   }
-
-  iframe.onerror = function() {
-    uploadProgress.value = null
-    alert('下载失败: 网络错误')
-  }
-
-  document.body.appendChild(iframe)
-
-  // 几秒后移除 iframe
-  setTimeout(() => {
-    document.body.removeChild(iframe)
-    uploadProgress.value = null
-  }, 5000)
 }
 
 // 上传文件
