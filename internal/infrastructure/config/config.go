@@ -61,10 +61,16 @@ type Web3Config struct {
 
 // UCANConfig UCAN authentication configuration
 type UCANConfig struct {
-	Enabled          bool   `yaml:"enabled"`
-	Audience         string `yaml:"audience"`
-	RequiredResource string `yaml:"required_resource"`
-	RequiredAction   string `yaml:"required_action"`
+	Enabled          bool           `yaml:"enabled"`
+	Audience         string         `yaml:"audience"`
+	RequiredResource string         `yaml:"required_resource"`
+	RequiredAction   string         `yaml:"required_action"`
+	AppScope         AppScopeConfig `yaml:"app_scope"`
+}
+
+// AppScopeConfig config for UCAN app scope enforcement.
+type AppScopeConfig struct {
+	PathPrefix string `yaml:"path_prefix"`
 }
 
 // SecurityConfig 安全配置
@@ -142,6 +148,11 @@ func DefaultConfig() *Config {
 		Web3: Web3Config{
 			TokenExpiration:        24 * time.Hour,
 			RefreshTokenExpiration: 30 * 24 * time.Hour,
+			UCAN: UCANConfig{
+				AppScope: AppScopeConfig{
+					PathPrefix: "/apps",
+				},
+			},
 		},
 		Security: SecurityConfig{
 			NoPassword:  false,

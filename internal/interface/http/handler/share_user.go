@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/yeying-community/webdav/internal/application/service"
+	"github.com/yeying-community/webdav/internal/domain/auth"
 	"github.com/yeying-community/webdav/internal/domain/shareuser"
 	"github.com/yeying-community/webdav/internal/domain/user"
 	"github.com/yeying-community/webdav/internal/interface/http/middleware"
@@ -77,6 +78,10 @@ func (h *ShareUserHandler) HandleCreate(w http.ResponseWriter, r *http.Request) 
 
 	item, err := h.shareUserService.Create(r.Context(), u, req.TargetAddress, req.Path, perms.String(), req.ExpiresIn)
 	if err != nil {
+		if errors.Is(err, auth.ErrAppScopeDenied) || errors.Is(err, auth.ErrAppScopeRequired) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		h.logger.Error("failed to create share user",
 			zap.String("owner", u.Username),
 			zap.String("path", req.Path),
@@ -86,13 +91,13 @@ func (h *ShareUserHandler) HandleCreate(w http.ResponseWriter, r *http.Request) 
 	}
 
 	resp := map[string]any{
-		"id":            item.ID,
-		"name":          item.Name,
-		"path":          item.Path,
-		"isDir":         item.IsDir,
-		"permissions":   permissionsToStrings(perms),
-		"targetWallet":  item.TargetWalletAddress,
-		"createdAt":     item.CreatedAt.Format(timeLayout),
+		"id":           item.ID,
+		"name":         item.Name,
+		"path":         item.Path,
+		"isDir":        item.IsDir,
+		"permissions":  permissionsToStrings(perms),
+		"targetWallet": item.TargetWalletAddress,
+		"createdAt":    item.CreatedAt.Format(timeLayout),
 	}
 	if item.ExpiresAt != nil {
 		resp["expiresAt"] = item.ExpiresAt.Format(timeLayout)
@@ -121,6 +126,10 @@ func (h *ShareUserHandler) HandleListMine(w http.ResponseWriter, r *http.Request
 
 	items, err := h.shareUserService.ListByOwner(r.Context(), u)
 	if err != nil {
+		if errors.Is(err, auth.ErrAppScopeDenied) || errors.Is(err, auth.ErrAppScopeRequired) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		h.logger.Error("failed to list share user items",
 			zap.String("owner", u.Username),
 			zap.Error(err))
@@ -185,6 +194,10 @@ func (h *ShareUserHandler) HandleListReceived(w http.ResponseWriter, r *http.Req
 
 	items, err := h.shareUserService.ListByTarget(r.Context(), u)
 	if err != nil {
+		if errors.Is(err, auth.ErrAppScopeDenied) || errors.Is(err, auth.ErrAppScopeRequired) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		h.logger.Error("failed to list received share items",
 			zap.String("target", u.Username),
 			zap.Error(err))
@@ -193,15 +206,15 @@ func (h *ShareUserHandler) HandleListReceived(w http.ResponseWriter, r *http.Req
 	}
 
 	type itemResp struct {
-		ID           string   `json:"id"`
-		Name         string   `json:"name"`
-		Path         string   `json:"path"`
-		IsDir        bool     `json:"isDir"`
-		Permissions  []string `json:"permissions"`
-		OwnerWallet  string   `json:"ownerWallet,omitempty"`
-		OwnerName    string   `json:"ownerName,omitempty"`
-		ExpiresAt    string   `json:"expiresAt,omitempty"`
-		CreatedAt    string   `json:"createdAt"`
+		ID          string   `json:"id"`
+		Name        string   `json:"name"`
+		Path        string   `json:"path"`
+		IsDir       bool     `json:"isDir"`
+		Permissions []string `json:"permissions"`
+		OwnerWallet string   `json:"ownerWallet,omitempty"`
+		OwnerName   string   `json:"ownerName,omitempty"`
+		ExpiresAt   string   `json:"expiresAt,omitempty"`
+		CreatedAt   string   `json:"createdAt"`
 	}
 
 	resp := struct {
@@ -265,6 +278,10 @@ func (h *ShareUserHandler) HandleRevoke(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := h.shareUserService.Revoke(r.Context(), u, req.ID); err != nil {
+		if errors.Is(err, auth.ErrAppScopeDenied) || errors.Is(err, auth.ErrAppScopeRequired) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		h.logger.Error("failed to revoke share user",
 			zap.String("owner", u.Username),
 			zap.String("share_id", req.ID),
@@ -300,7 +317,7 @@ func (h *ShareUserHandler) HandleEntries(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	item, owner, err := h.shareUserService.ResolveForTarget(r.Context(), u, shareID)
+	item, owner, err := h.shareUserService.ResolveForTarget(r.Context(), u, shareID, "read")
 	if err != nil {
 		writeShareUserError(w, err)
 		return
@@ -402,7 +419,7 @@ func (h *ShareUserHandler) HandleDownload(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	item, owner, err := h.shareUserService.ResolveForTarget(r.Context(), u, shareID)
+	item, owner, err := h.shareUserService.ResolveForTarget(r.Context(), u, shareID, "read")
 	if err != nil {
 		writeShareUserError(w, err)
 		return
@@ -472,7 +489,7 @@ func (h *ShareUserHandler) HandleUpload(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	item, owner, err := h.shareUserService.ResolveForTarget(r.Context(), u, shareID)
+	item, owner, err := h.shareUserService.ResolveForTarget(r.Context(), u, shareID, "create", "update")
 	if err != nil {
 		writeShareUserError(w, err)
 		return
@@ -556,7 +573,7 @@ func (h *ShareUserHandler) HandleCreateFolder(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	item, owner, err := h.shareUserService.ResolveForTarget(r.Context(), u, req.ShareID)
+	item, owner, err := h.shareUserService.ResolveForTarget(r.Context(), u, req.ShareID, "create")
 	if err != nil {
 		writeShareUserError(w, err)
 		return
@@ -618,7 +635,7 @@ func (h *ShareUserHandler) HandleRename(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	item, owner, err := h.shareUserService.ResolveForTarget(r.Context(), u, req.ShareID)
+	item, owner, err := h.shareUserService.ResolveForTarget(r.Context(), u, req.ShareID, "move")
 	if err != nil {
 		writeShareUserError(w, err)
 		return
@@ -684,7 +701,7 @@ func (h *ShareUserHandler) HandleDelete(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	item, owner, err := h.shareUserService.ResolveForTarget(r.Context(), u, req.ShareID)
+	item, owner, err := h.shareUserService.ResolveForTarget(r.Context(), u, req.ShareID, "delete")
 	if err != nil {
 		writeShareUserError(w, err)
 		return
@@ -714,6 +731,10 @@ func (h *ShareUserHandler) HandleDelete(w http.ResponseWriter, r *http.Request) 
 }
 
 func writeShareUserError(w http.ResponseWriter, err error) {
+	if errors.Is(err, auth.ErrAppScopeDenied) || errors.Is(err, auth.ErrAppScopeRequired) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
 	if err == shareuser.ErrShareNotFound || errors.Is(err, shareuser.ErrShareNotFound) {
 		http.Error(w, "Not Found", http.StatusNotFound)
 		return

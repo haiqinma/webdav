@@ -147,6 +147,71 @@ func BuildRequiredUcanCaps(resource, action string) []UcanCapability {
 	return []UcanCapability{{Resource: resource, Action: action}}
 }
 
+func parseUcanCaps(token string) ([]UcanCapability, error) {
+	_, payload, _, _, err := decodeUcanToken(token)
+	if err != nil {
+		return nil, err
+	}
+	return payload.Cap, nil
+}
+
+func extractAppCapsFromCaps(caps []UcanCapability, resourcePrefix string) map[string][]string {
+	prefix := strings.TrimSpace(resourcePrefix)
+	if prefix == "" {
+		prefix = "app:"
+	}
+	actionSets := make(map[string]map[string]struct{}, len(caps))
+	for _, cap := range caps {
+		resource := strings.TrimSpace(cap.Resource)
+		if !strings.HasPrefix(resource, prefix) {
+			continue
+		}
+		appID := strings.TrimSpace(strings.TrimPrefix(resource, prefix))
+		if appID == "" || strings.Contains(appID, "*") {
+			continue
+		}
+		if !isValidAppID(appID) {
+			continue
+		}
+		if _, ok := actionSets[appID]; !ok {
+			actionSets[appID] = make(map[string]struct{})
+		}
+		action := strings.ToLower(strings.TrimSpace(cap.Action))
+		if action == "" {
+			continue
+		}
+		actionSets[appID][action] = struct{}{}
+	}
+
+	result := make(map[string][]string, len(actionSets))
+	for appID, actions := range actionSets {
+		list := make([]string, 0, len(actions))
+		for action := range actions {
+			list = append(list, action)
+		}
+		result[appID] = list
+	}
+	return result
+}
+
+func isValidAppID(appID string) bool {
+	if appID == "" {
+		return false
+	}
+	for i := 0; i < len(appID); i++ {
+		c := appID[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+		case c >= 'A' && c <= 'Z':
+		case c >= '0' && c <= '9':
+		case c == '-' || c == '_' || c == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func formatCaps(caps []UcanCapability) string {
 	if len(caps) == 0 {
 		return "-"
@@ -242,6 +307,25 @@ func normalizeEpochMillis(value int64) int64 {
 }
 
 func matchPattern(pattern, value string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return value == ""
+	}
+	pattern = strings.ReplaceAll(pattern, "|", ",")
+	parts := strings.Split(pattern, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if matchSinglePattern(part, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchSinglePattern(pattern, value string) bool {
 	if pattern == "*" {
 		return true
 	}
@@ -258,7 +342,9 @@ func capsAllow(available []UcanCapability, required []UcanCapability) bool {
 	for _, req := range required {
 		matched := false
 		for _, cap := range available {
-			if matchPattern(cap.Resource, req.Resource) && matchPattern(cap.Action, req.Action) {
+			resourceMatched := matchPattern(req.Resource, cap.Resource) || matchPattern(cap.Resource, req.Resource)
+			actionMatched := matchPattern(req.Action, cap.Action) || matchPattern(cap.Action, req.Action)
+			if resourceMatched && actionMatched {
 				matched = true
 				break
 			}

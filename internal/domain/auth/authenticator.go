@@ -18,6 +18,11 @@ type Authenticator interface {
 	CanHandle(credentials interface{}) bool
 }
 
+// ContextEnricher enriches request context after successful authentication.
+type ContextEnricher interface {
+	EnrichContext(ctx context.Context, credentials interface{}) context.Context
+}
+
 // BasicCredentials Basic 认证凭证
 type BasicCredentials struct {
 	Username string
