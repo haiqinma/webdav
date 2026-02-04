@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/yeying-community/webdav/internal/application/service"
+	"github.com/yeying-community/webdav/internal/domain/auth"
 	"github.com/yeying-community/webdav/internal/domain/share"
 	"github.com/yeying-community/webdav/internal/interface/http/middleware"
 	"go.uber.org/zap"
@@ -58,6 +59,10 @@ func (h *ShareHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.shareService.Create(r.Context(), u, req.Path, req.ExpiresIn)
 	if err != nil {
+		if errors.Is(err, auth.ErrAppScopeDenied) || errors.Is(err, auth.ErrAppScopeRequired) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		h.logger.Error("failed to create share",
 			zap.String("username", u.Username),
 			zap.String("path", req.Path),
@@ -101,6 +106,10 @@ func (h *ShareHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 
 	items, err := h.shareService.List(r.Context(), u)
 	if err != nil {
+		if errors.Is(err, auth.ErrAppScopeDenied) || errors.Is(err, auth.ErrAppScopeRequired) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		h.logger.Error("failed to list share items",
 			zap.String("username", u.Username),
 			zap.Error(err))
@@ -176,6 +185,10 @@ func (h *ShareHandler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.shareService.Revoke(r.Context(), u, req.Token); err != nil {
+		if errors.Is(err, auth.ErrAppScopeDenied) || errors.Is(err, auth.ErrAppScopeRequired) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		h.logger.Error("failed to revoke share",
 			zap.String("username", u.Username),
 			zap.String("token", req.Token),

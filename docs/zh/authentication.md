@@ -29,7 +29,8 @@
 
 ## 访问资源的权限设计
 
-认证只确认“是谁”，资源访问授权由权限系统统一控制（与 Basic/JWT/UCAN 无关）。
+认证只确认“是谁”，资源访问授权由权限系统统一控制（与 Basic/JWT/UCAN 基本无关），  
+但当 UCAN 携带 `app:<appId>` 时，会额外做应用目录前缀与读写动作限制。
 
 ### 权限来源与优先级
 
@@ -138,13 +139,14 @@ UCAN 的能力字段为：`cap: [{ resource, action }]`。服务端会将配置�
   - 其他情况为完全相等匹配。
 
 > 当前实现只做“是否满足 required_resource/action”的二值校验，
-> **不会**把 UCAN 的 action 映射到 WebDAV 的具体读写权限。
+> **不会**把 UCAN 的 action 映射到 WebDAV 的具体读写权限，  
+> 但 `app:<appId>` 能力会用于应用目录的读写限制。
 
 ### UCAN 登录支持的资源权限
 
 - `resource/action` 为字符串，不设固定枚举；实际支持范围由 `web3.ucan.required_resource` / `required_action` 决定。
 - 通过 UCAN 仅完成“身份 + 必需能力”的准入校验，**不会替代**用户自身的 `C/R/U/D` 权限与规则校验。
-- 若需要更细粒度的 UCAN 资源权限约束，需在 DApp 或网关侧约定并执行（当前服务端未内置）。
+- 若需要应用级目录隔离，可设置 `required_resource=app:*`，并将 `required_action` 设为 `read,write` 或 `read`（也支持 `create/update/delete/move/copy`）；服务端会基于 `app:<appId>` 做路径前缀限制（前缀由 `app_scope.path_prefix` 决定）。
 
 #### DApp 该如何选择 resource/action
 

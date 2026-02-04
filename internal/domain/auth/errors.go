@@ -20,4 +20,10 @@ var (
 
 	// ErrInvalidChallenge 无效挑战信息
 	ErrInvalidChallenge = errors.New("invalid challenge")
+
+	// ErrAppScopeRequired UCAN app scope required
+	ErrAppScopeRequired = errors.New("ucan app scope required")
+
+	// ErrAppScopeDenied UCAN app scope denied
+	ErrAppScopeDenied = errors.New("ucan app scope denied")
 )

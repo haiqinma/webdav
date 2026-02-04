@@ -8,6 +8,7 @@
 
 - `architecture.md`：总体架构与启动/请求处理链路
 - `authentication.md`：认证体系（Basic/Web3/JWT/UCAN）与登录流程
+- `ucan.md`：WebDAV 中 UCAN 校验与能力匹配规则
 - `config-deployment.md`：配置加载/覆盖规则与部署方式
 - `webdav-flow.md`：WebDAV 请求处理流程与配额/权限/回收站
 - `data-model.md`：数据库表结构与关系

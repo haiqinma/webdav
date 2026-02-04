@@ -2,9 +2,11 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/yeying-community/webdav/internal/application/service"
+	"github.com/yeying-community/webdav/internal/domain/auth"
 	"github.com/yeying-community/webdav/internal/domain/user"
 	"github.com/yeying-community/webdav/internal/interface/http/middleware"
 	"go.uber.org/zap"
@@ -46,6 +48,10 @@ func (h *RecycleHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 
 	response, err := h.recycleService.List(r.Context(), u)
 	if err != nil {
+		if errors.Is(err, auth.ErrAppScopeDenied) || errors.Is(err, auth.ErrAppScopeRequired) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		h.logger.Error("failed to list recycle items",
 			zap.String("username", u.Username),
 			zap.Error(err))
@@ -90,6 +96,10 @@ func (h *RecycleHandler) HandleRecover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.recycleService.Recover(r.Context(), u, req.Hash); err != nil {
+		if errors.Is(err, auth.ErrAppScopeDenied) || errors.Is(err, auth.ErrAppScopeRequired) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		h.logger.Error("failed to recover file",
 			zap.String("username", u.Username),
 			zap.String("hash", req.Hash),
@@ -133,6 +143,10 @@ func (h *RecycleHandler) HandleRemove(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.recycleService.Remove(r.Context(), u, req.Hash); err != nil {
+		if errors.Is(err, auth.ErrAppScopeDenied) || errors.Is(err, auth.ErrAppScopeRequired) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		h.logger.Error("failed to remove file",
 			zap.String("username", u.Username),
 			zap.String("hash", req.Hash),
@@ -163,6 +177,10 @@ func (h *RecycleHandler) HandleClear(w http.ResponseWriter, r *http.Request) {
 
 	deleted, err := h.recycleService.Clear(r.Context(), u)
 	if err != nil {
+		if errors.Is(err, auth.ErrAppScopeDenied) || errors.Is(err, auth.ErrAppScopeRequired) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		h.logger.Error("failed to clear recycle items",
 			zap.String("username", u.Username),
 			zap.Error(err))

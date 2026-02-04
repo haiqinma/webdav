@@ -45,6 +45,9 @@ func (s *ShareService) Create(ctx context.Context, u *user.User, rawPath string,
 	if err != nil {
 		return nil, err
 	}
+	if err := enforceAppScope(ctx, s.config, cleanPath, "create"); err != nil {
+		return nil, err
+	}
 
 	fullPath := s.resolveFullPath(u, cleanPath)
 	info, err := os.Stat(fullPath)
@@ -78,7 +81,24 @@ func (s *ShareService) Create(ctx context.Context, u *user.User, rawPath string,
 
 // List 获取用户分享列表
 func (s *ShareService) List(ctx context.Context, u *user.User) ([]*share.ShareItem, error) {
-	return s.shareRepo.GetByUserID(ctx, u.ID)
+	items, err := s.shareRepo.GetByUserID(ctx, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	scope, err := resolveAppScope(ctx, s.config)
+	if err != nil {
+		return nil, err
+	}
+	if !scope.active {
+		return items, nil
+	}
+	filtered := make([]*share.ShareItem, 0, len(items))
+	for _, item := range items {
+		if scope.allowsAny(item.Path, "read") {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered, nil
 }
 
 // Revoke 取消分享
@@ -89,6 +109,9 @@ func (s *ShareService) Revoke(ctx context.Context, u *user.User, token string) e
 	}
 	if item.UserID != u.ID {
 		return fmt.Errorf("permission denied: not your share")
+	}
+	if err := enforceAppScope(ctx, s.config, item.Path, "delete"); err != nil {
+		return err
 	}
 	return s.shareRepo.DeleteByToken(ctx, token)
 }

@@ -49,6 +49,9 @@ func (s *ShareUserService) Create(ctx context.Context, owner *user.User, targetW
 	if err != nil {
 		return nil, err
 	}
+	if err := enforceAppScope(ctx, s.config, cleanPath, "create"); err != nil {
+		return nil, err
+	}
 
 	target, err := s.userRepo.FindByWalletAddress(ctx, targetWallet)
 	if err != nil {
@@ -130,12 +133,46 @@ func shortenWallet(address string) string {
 
 // ListByOwner 获取我分享的列表
 func (s *ShareUserService) ListByOwner(ctx context.Context, owner *user.User) ([]*shareuser.ShareUserItem, error) {
-	return s.repo.GetByOwnerID(ctx, owner.ID)
+	items, err := s.repo.GetByOwnerID(ctx, owner.ID)
+	if err != nil {
+		return nil, err
+	}
+	scope, err := resolveAppScope(ctx, s.config)
+	if err != nil {
+		return nil, err
+	}
+	if !scope.active {
+		return items, nil
+	}
+	filtered := make([]*shareuser.ShareUserItem, 0, len(items))
+	for _, item := range items {
+		if scope.allowsAny(item.Path, "read") {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered, nil
 }
 
 // ListByTarget 获取分享给我的列表
 func (s *ShareUserService) ListByTarget(ctx context.Context, target *user.User) ([]*shareuser.ShareUserItem, error) {
-	return s.repo.GetByTargetID(ctx, target.ID)
+	items, err := s.repo.GetByTargetID(ctx, target.ID)
+	if err != nil {
+		return nil, err
+	}
+	scope, err := resolveAppScope(ctx, s.config)
+	if err != nil {
+		return nil, err
+	}
+	if !scope.active {
+		return items, nil
+	}
+	filtered := make([]*shareuser.ShareUserItem, 0, len(items))
+	for _, item := range items {
+		if scope.allowsAny(item.Path, "read") {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered, nil
 }
 
 // Revoke 取消分享
@@ -147,11 +184,14 @@ func (s *ShareUserService) Revoke(ctx context.Context, owner *user.User, id stri
 	if item.OwnerUserID != owner.ID {
 		return fmt.Errorf("permission denied: not your share")
 	}
+	if err := enforceAppScope(ctx, s.config, item.Path, "delete"); err != nil {
+		return err
+	}
 	return s.repo.DeleteByID(ctx, id)
 }
 
 // ResolveForTarget 校验分享并返回分享记录与拥有者
-func (s *ShareUserService) ResolveForTarget(ctx context.Context, target *user.User, id string) (*shareuser.ShareUserItem, *user.User, error) {
+func (s *ShareUserService) ResolveForTarget(ctx context.Context, target *user.User, id string, requiredActions ...string) (*shareuser.ShareUserItem, *user.User, error) {
 	item, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, nil, err
@@ -161,6 +201,9 @@ func (s *ShareUserService) ResolveForTarget(ctx context.Context, target *user.Us
 	}
 	if item.TargetUserID != target.ID {
 		return nil, nil, fmt.Errorf("permission denied: not your share")
+	}
+	if err := enforceAppScope(ctx, s.config, item.Path, requiredActions...); err != nil {
+		return nil, nil, err
 	}
 	owner, err := s.userRepo.FindByID(ctx, item.OwnerUserID)
 	if err != nil {

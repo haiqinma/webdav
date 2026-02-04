@@ -112,6 +112,9 @@ func (l *Loader) overrideFromEnv(config *Config) {
 	if v := os.Getenv("WEBDAV_UCAN_ACTION"); v != "" {
 		config.Web3.UCAN.RequiredAction = v
 	}
+	if v := os.Getenv("WEBDAV_UCAN_APP_SCOPE_PATH_PREFIX"); v != "" {
+		config.Web3.UCAN.AppScope.PathPrefix = v
+	}
 }
 
 // validate 验证配置

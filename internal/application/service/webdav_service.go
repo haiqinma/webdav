@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/yeying-community/webdav/internal/domain/auth"
 	"github.com/yeying-community/webdav/internal/domain/permission"
 	"github.com/yeying-community/webdav/internal/domain/quota"
 	"github.com/yeying-community/webdav/internal/domain/recycle"
@@ -106,6 +107,24 @@ func (s *WebDAVService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 规范化 MOVE/COPY 的 Destination 头，避免编码或代理导致的路径异常
+	if r.Method == "MOVE" || r.Method == "COPY" {
+		normalizeDestinationHeader(r)
+	}
+
+	// UCAN app scope 校验
+	if err := s.checkAppScope(r.Context(), r); err != nil {
+		s.logger.Warn("ucan app scope denied",
+			zap.String("username", u.Username),
+			zap.String("method", r.Method),
+			zap.String("path", r.URL.Path),
+			zap.String("destination", r.Header.Get("Destination")),
+			zap.Error(err),
+		)
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
 	// 检查权限
 	if err := s.checkPermission(r.Context(), u, r); err != nil {
 		s.logger.Warn("permission denied",
@@ -151,11 +170,6 @@ func (s *WebDAVService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodDelete {
 		s.handleDeleteWithRecycle(w, r, u, userDir, handler, rec)
 		return
-	}
-
-	// 规范化 MOVE/COPY 的 Destination 头，避免编码或代理导致的路径异常
-	if r.Method == "MOVE" || r.Method == "COPY" {
-		normalizeDestinationHeader(r)
 	}
 
 	handler.ServeHTTP(rec, r)
@@ -611,4 +625,85 @@ func (s *WebDAVService) checkPermission(ctx context.Context, u *user.User, r *ht
 
 	// 检查权限
 	return s.permissionCheck.Check(ctx, u, fullPath, operation)
+}
+
+func (s *WebDAVService) checkAppScope(ctx context.Context, r *http.Request) error {
+	scope, err := resolveAppScope(ctx, s.config)
+	if err != nil {
+		return err
+	}
+	if !scope.active {
+		return nil
+	}
+
+	sourcePath := s.normalizeWebdavRequestPath(r.URL.Path)
+	actions := requiredActionsForWebdavMethod(r.Method)
+	if !scope.allowsAny(sourcePath, actions...) {
+		return auth.ErrAppScopeDenied
+	}
+
+	if r.Method == "MOVE" || r.Method == "COPY" {
+		dest := strings.TrimSpace(r.Header.Get("Destination"))
+		if dest != "" {
+			destPath := s.normalizeWebdavRequestPath(dest)
+			if !scope.allowsAny(destPath, actions...) {
+				return auth.ErrAppScopeDenied
+			}
+		}
+	}
+
+	return nil
+}
+
+func requiredActionsForWebdavMethod(method string) []string {
+	switch strings.ToUpper(method) {
+	case "GET", "HEAD", "OPTIONS", "PROPFIND", "REPORT", "SEARCH":
+		return []string{"read"}
+	case "MKCOL", "POST":
+		return []string{"create"}
+	case "PUT":
+		return []string{"update", "create"}
+	case "PATCH", "PROPPATCH", "LOCK", "UNLOCK":
+		return []string{"update"}
+	case "DELETE":
+		return []string{"delete"}
+	case "MOVE":
+		return []string{"move"}
+	case "COPY":
+		return []string{"copy"}
+	default:
+		op := permission.MapHTTPMethodToOperation(method)
+		if op == permission.OperationRead {
+			return []string{"read"}
+		}
+		return []string{"write"}
+	}
+}
+
+func (s *WebDAVService) normalizeWebdavRequestPath(rawPath string) string {
+	rawPath = strings.TrimSpace(rawPath)
+	if rawPath == "" {
+		return "/"
+	}
+	if strings.HasPrefix(rawPath, "http://") || strings.HasPrefix(rawPath, "https://") {
+		if u, err := url.Parse(rawPath); err == nil && u.Path != "" {
+			rawPath = u.Path
+		}
+	}
+
+	prefix := strings.TrimSpace(s.config.WebDAV.Prefix)
+	if prefix == "" || prefix == "/" {
+		return rawPath
+	}
+	if !strings.HasPrefix(prefix, "/") {
+		prefix = "/" + prefix
+	}
+	prefix = strings.TrimSuffix(prefix, "/")
+	if prefix != "" && prefix != "/" && strings.HasPrefix(rawPath, prefix) {
+		rawPath = strings.TrimPrefix(rawPath, prefix)
+		if rawPath == "" {
+			rawPath = "/"
+		}
+	}
+	return rawPath
 }

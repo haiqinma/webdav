@@ -59,11 +59,15 @@ func (m *AuthMiddleware) Handle(next http.Handler) http.Handler {
 		}
 
 		// 尝试使用所有认证器进行认证
-		u, err := m.authenticate(ctx, credentials)
+		u, authenticator, err := m.authenticate(ctx, credentials)
 		if err != nil {
 			m.logger.Warn("authentication failed", zap.Error(err))
 			m.sendUnauthorized(w, r, "Authentication failed")
 			return
+		}
+
+		if enricher, ok := authenticator.(auth.ContextEnricher); ok {
+			ctx = enricher.EnrichContext(ctx, credentials)
 		}
 
 		// 将用户信息放入上下文
@@ -77,7 +81,7 @@ func (m *AuthMiddleware) Handle(next http.Handler) http.Handler {
 }
 
 // authenticate 认证用户
-func (m *AuthMiddleware) authenticate(ctx context.Context, credentials interface{}) (*user.User, error) {
+func (m *AuthMiddleware) authenticate(ctx context.Context, credentials interface{}) (*user.User, auth.Authenticator, error) {
 	// 遍历所有认证器
 	for _, authenticator := range m.authenticators {
 		// 检查是否可以处理该凭证
@@ -94,17 +98,17 @@ func (m *AuthMiddleware) authenticate(ctx context.Context, credentials interface
 			m.logger.Debug("authentication failed",
 				zap.String("authenticator", authenticator.Name()),
 				zap.Error(err))
-			return nil, err
+			return nil, nil, err
 		}
 
 		m.logger.Debug("authentication successful",
 			zap.String("authenticator", authenticator.Name()),
 			zap.String("username", u.Username))
 
-		return u, nil
+		return u, authenticator, nil
 	}
 
-	return nil, auth.ErrInvalidCredentials
+	return nil, nil, auth.ErrInvalidCredentials
 }
 
 // extractCredentials 提取凭证

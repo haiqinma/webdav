@@ -3,11 +3,13 @@ package auth
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/yeying-community/webdav/internal/domain/auth"
 	"github.com/yeying-community/webdav/internal/domain/user"
 	"github.com/yeying-community/webdav/internal/infrastructure/crypto"
+	"github.com/yeying-community/webdav/internal/interface/http/middleware"
 	"go.uber.org/zap"
 )
 
@@ -76,6 +78,27 @@ func (a *Web3Authenticator) Authenticate(ctx context.Context, credentials interf
 		zap.String("address", address))
 
 	return u, nil
+}
+
+// EnrichContext attaches UCAN scope info to the request context.
+func (a *Web3Authenticator) EnrichContext(ctx context.Context, credentials interface{}) context.Context {
+	creds, ok := credentials.(*auth.BearerCredentials)
+	if !ok || ctx == nil {
+		return ctx
+	}
+	token := strings.TrimSpace(creds.Token)
+	if token == "" || !isUcanToken(token) {
+		return ctx
+	}
+
+	caps, err := parseUcanCaps(token)
+	if err != nil {
+		a.logger.Debug("failed to parse ucan caps", zap.Error(err))
+		return middleware.WithUcanContext(ctx, &middleware.UcanContext{AppCaps: map[string][]string{}})
+	}
+
+	appCaps := extractAppCapsFromCaps(caps, "app:")
+	return middleware.WithUcanContext(ctx, &middleware.UcanContext{AppCaps: appCaps})
 }
 
 func (a *Web3Authenticator) verifyToken(token string) (string, error) {

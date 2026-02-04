@@ -38,10 +38,12 @@ web3:
   token_expiration: 24h
   refresh_token_expiration: 720h
   ucan:
-    enabled: false
+    enabled: true
     audience: "did:web:127.0.0.1:6065"
-    required_resource: "profile"
-    required_action: "read"
+    required_resource: "app:*"
+    required_action: "read,write"
+    app_scope:
+      path_prefix: "/apps"
 
 # Security Configuration
 security:

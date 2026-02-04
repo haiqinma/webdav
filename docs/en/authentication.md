@@ -29,7 +29,8 @@ For WebDAV requests with missing credentials, a `WWW-Authenticate` header is ret
 
 ## Resource Access Permission Design
 
-Authentication only establishes identity; authorization is handled by the permission system (independent of Basic/JWT/UCAN).
+Authentication only establishes identity; authorization is handled by the permission system (independent of Basic/JWT/UCAN),
+except UCAN `app:<appId>` caps which also enforce app path prefix and read/write actions.
 
 ### Sources & Precedence
 
@@ -139,38 +140,55 @@ and checks it during authentication. Matching rules:
   - Otherwise, values must be equal.
 
 > Current implementation only checks whether the required resource/action is present,
-> **it does not** map UCAN actions to WebDAV method-level permissions.
+> **it does not** map UCAN actions to WebDAV method-level permissions,
+> except `app:<appId>` caps which are used for app path read/write enforcement.
 
 ### UCAN Resource Permissions for Login
 
 - `resource/action` are opaque strings with no fixed enum; the supported scope is defined by `web3.ucan.required_resource` / `required_action`.
 - UCAN only gates authentication via required capability checks; it **does not** replace the user's `C/R/U/D` permissions or rules.
-- If you need fine-grained UCAN-based authorization, enforce it at the DApp or gateway level (not built into the server yet).
+- For app-level directory isolation, set `required_resource=app:*` and `required_action=read,write` (or `read`, plus `create/update/delete/move/copy`); the server enforces path prefixes based on `app:<appId>` with `app_scope.path_prefix`.
 
 #### How a DApp should choose resource/action
 
 Use the server configuration values (`web3.ucan.required_resource` / `required_action`),
 and include at least one capability entry that satisfies them.
 
-Example (server requires `resource=webdav`, `action=read`):
+**Recommended for WebDAV app isolation**:
 
 ```json
 {
   "cap": [
-    { "resource": "webdav", "action": "read" }
+    { "resource": "app:dapp.example.com", "action": "write" }
   ]
 }
 ```
 
-Example (server requires `resource=webdav/*`, `action=*`):
+To grant read-only access to another app directory, add another capability:
 
 ```json
 {
   "cap": [
-    { "resource": "webdav/files/*", "action": "write" }
+    { "resource": "app:dapp.example.com", "action": "write" },
+    { "resource": "app:foo.com", "action": "read" }
   ]
 }
 ```
+
+**DApp-side appId & caps (browser example)**:
+
+```ts
+const appId = window.location.hostname.toLowerCase();
+const caps = [
+  { resource: `app:${appId}`, action: 'write' },
+];
+const extraReadApps = ['foo.com', 'bar.org'];
+for (const otherAppId of extraReadApps) {
+  caps.push({ resource: `app:${otherAppId}`, action: 'read' });
+}
+```
+
+> Avoid using `app:*` or `app:xxx*` in UCAN caps, which would bypass directory isolation.
 
 ## Cookie & Security Notes
 

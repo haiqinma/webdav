@@ -101,12 +101,19 @@ func (s *RecycleService) List(ctx context.Context, u *user.User) (*ListResponse,
 	if err != nil {
 		return nil, fmt.Errorf("failed to list recycle items: %w", err)
 	}
+	scope, err := resolveAppScope(ctx, s.config)
+	if err != nil {
+		return nil, err
+	}
 
 	response := &ListResponse{
 		Items: make([]*RecycleItemResponse, 0, len(items)),
 	}
 
 	for _, item := range items {
+		if scope.active && !scope.allowsAny(item.Path, "read") {
+			continue
+		}
 		isDir := false
 		if recyclePath, err := s.findRecyclePath(item); err == nil {
 			if info, err := os.Stat(recyclePath); err == nil {
@@ -138,6 +145,9 @@ func (s *RecycleService) Recover(ctx context.Context, u *user.User, hash string)
 	// 验证所有权
 	if item.UserID != u.ID {
 		return fmt.Errorf("permission denied: not your file")
+	}
+	if err := enforceAppScope(ctx, s.config, item.Path, "update", "create"); err != nil {
+		return err
 	}
 
 	// 检查原路径是否已存在文件
@@ -192,6 +202,9 @@ func (s *RecycleService) Remove(ctx context.Context, u *user.User, hash string) 
 	if item.UserID != u.ID {
 		return fmt.Errorf("permission denied: not your file")
 	}
+	if err := enforceAppScope(ctx, s.config, item.Path, "delete"); err != nil {
+		return err
+	}
 
 	// 删除回收站中的实际文件
 	if recyclePath, err := s.findRecyclePath(item); err == nil {
@@ -222,10 +235,17 @@ func (s *RecycleService) Clear(ctx context.Context, u *user.User) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to list recycle items: %w", err)
 	}
+	scope, err := resolveAppScope(ctx, s.config)
+	if err != nil {
+		return 0, err
+	}
 
 	cleared := 0
 	var firstErr error
 	for _, item := range items {
+		if scope.active && !scope.allowsAny(item.Path, "delete") {
+			continue
+		}
 		if recyclePath, err := s.findRecyclePath(item); err == nil {
 			if err := os.RemoveAll(recyclePath); err != nil && !os.IsNotExist(err) {
 				if firstErr == nil {
