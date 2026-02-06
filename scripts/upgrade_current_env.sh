@@ -55,7 +55,7 @@ package_file=$(ls -t "${package_candidates[@]}" | head -n 1)
 echo -e "use package: ${package_file}" | tee -a "$LOGFILE"
 
 index=$((index+1))
-echo -e "\nstep $index -- extract package and update deploy directory" | tee -a "$LOGFILE"
+echo -e "\nstep $index -- extract package and replace build/dist" | tee -a "$LOGFILE"
 tmp_dir=$(mktemp -d "/tmp/${service_name}_upgrade_XXXXXX")
 tar -zxf "$package_file" -C "$tmp_dir"
 package_dir="${tmp_dir}/${service_name}"
@@ -72,26 +72,44 @@ if [[ ! -d "${package_dir}/build" ]]; then
     exit 6
 fi
 
-config_backup=""
-if [[ -f "${deploy_dir}/config.yaml" ]]; then
-    config_backup="${tmp_dir}/config.yaml.backup"
-    cp -a "${deploy_dir}/config.yaml" "${config_backup}"
+if [[ ! -d "${deploy_dir}" ]]; then
+    echo -e "ERROR! deploy directory is missing: ${deploy_dir}" | tee -a "$LOGFILE"
+    exit 7
 fi
 
-mkdir -p "${deploy_root}"
-if [[ -d "${deploy_dir}" ]]; then
-    rm -rf "${deploy_dir}"
+if [[ -d "${deploy_dir}/build" ]]; then
+    rm -rf "${deploy_dir}/build"
 fi
-mv "${package_dir}" "${deploy_dir}"
-if [[ -n "${config_backup}" && ! -f "${deploy_dir}/config.yaml" ]]; then
-    cp -a "${config_backup}" "${deploy_dir}/config.yaml"
+cp -a "${package_dir}/build" "${deploy_dir}/"
+
+if [[ -d "${deploy_dir}/dist" ]]; then
+    rm -rf "${deploy_dir}/dist"
 fi
+cp -a "${package_dir}/dist" "${deploy_dir}/"
+
+shopt -s nullglob
+old_versions=("${deploy_dir}/version_information"*)
+shopt -u nullglob
+if [[ ${#old_versions[@]} -gt 0 ]]; then
+    rm -f "${old_versions[@]}"
+fi
+
+index=$((index+1))
+echo -e "\nstep $index -- update version information" | tee -a "$LOGFILE"
+shopt -s nullglob
+version_files=("${package_dir}/version_information"*)
+shopt -u nullglob
+if [[ ${#version_files[@]} -eq 0 ]]; then
+    echo -e "ERROR! version_information file is missing in ${package_dir}" | tee -a "$LOGFILE"
+    exit 8
+fi
+cp -a "${version_files[@]}" "${deploy_dir}/"
 
 index=$((index+1))
 echo -e "\nstep $index -- update nginx static files" | tee -a "$LOGFILE"
 if [[ ! -d "${deploy_web_root}" ]]; then
     echo -e "ERROR! there is no directory for nginx static files." | tee -a "$LOGFILE"
-    exit 7
+    exit 9
 else
     rm -rf "${deploy_web_root}"
 fi
@@ -109,18 +127,18 @@ index=$((index+1))
 echo -e "\nstep $index -- update backend build files" | tee -a "$LOGFILE"
 if [[ ! -d "${deploy_dir}/build" ]]; then
     echo -e "ERROR! build is missing in ${deploy_dir}" | tee -a "$LOGFILE"
-    exit 8
+    exit 10
 fi
 
 index=$((index+1))
 echo -e "\nstep $index -- restart ${service_name} backend" | tee -a "$LOGFILE"
 if [[ ! -x "$binary_path" ]]; then
     echo -e "ERROR! webdav binary is missing at ${binary_path}" | tee -a "$LOGFILE"
-    exit 9
+    exit 11
 fi
 if [[ ! -f "$deploy_config" ]]; then
     echo -e "ERROR! config.yaml is missing at ${deploy_config}" | tee -a "$LOGFILE"
-    exit 10
+    exit 12
 fi
 if command -v pgrep >/dev/null 2>&1; then
     pid=$(pgrep -f "$run_pattern" || true)
